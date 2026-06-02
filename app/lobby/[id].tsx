@@ -9,6 +9,7 @@ import {
   View,
 } from "react-native";
 
+import { useGameRound } from "@/src/hooks/useGameRound";
 import { supabase } from "../../lib/supabase";
 import { AppButton } from "../../src/components/AppButton";
 import UserContainer from "../../src/components/UserContainer";
@@ -57,11 +58,11 @@ export default function LobbyScreen() {
       .from("room_players")
       .select(
         `
-        seat_number,
-        is_host,
-        user_id,
-        profiles:user_id ( username )
-      `
+          seat_number,
+          is_host,
+          user_id,
+          profiles:user_id ( username )
+        `,
       )
       .eq("room_id", roomId)
       .order("seat_number", { ascending: true });
@@ -137,7 +138,7 @@ export default function LobbyScreen() {
         },
         () => {
           fetchPlayers(room.id);
-        }
+        },
       )
       // Fires on all devices when room is updated (e.g. game started)
       .on(
@@ -152,13 +153,10 @@ export default function LobbyScreen() {
           const updatedRoom = payload.new as Room;
           setRoom((prev) => (prev ? { ...prev, ...updatedRoom } : prev));
 
-          if (
-            updatedRoom.status === "active" ||
-            updatedRoom.status === "started"
-          ) {
-            router.push("/gamescreen/gamescreen");
+          if (["active", "started", "playing"].includes(updatedRoom.status)) {
+            router.push(`/gamescreen/gamescreen?roomId=${room.id}`);
           }
-        }
+        },
       )
       // Fires on all devices when host deletes the room → redirect guests home
       .on(
@@ -171,7 +169,7 @@ export default function LobbyScreen() {
         },
         () => {
           router.replace("/");
-        }
+        },
       )
       .subscribe();
 
@@ -203,7 +201,6 @@ export default function LobbyScreen() {
           .eq("id", room.id);
 
         if (error) throw error;
-
       } else {
         // Filter by BOTH user_id AND room_id — without room_id this is a silent no-op
         const { error: deleteError } = await supabase
@@ -234,22 +231,30 @@ export default function LobbyScreen() {
   // =========================
   // START GAME
   // =========================
+  const { startNewRound } = useGameRound();
+
   const handleStartGame = async () => {
     if (!room?.id) return;
 
     setIsStarting(true);
 
-    // Updating status fires a realtime UPDATE to all devices
-    // Every device's listener catches it and routes to gamescreen
     const { error } = await supabase
       .from("game_rooms")
-      .update({ status: "active" })
+      .update({
+        status: "playing",
+        started_at: new Date().toISOString(),
+        current_round: 1,
+      })
       .eq("id", room.id);
 
     if (error) {
       console.error("Failed to start game:", error);
       setIsStarting(false);
+      return;
     }
+
+    await startNewRound(room.id);
+    // router.push("/gamescreen/gamescreen");
   };
 
   if (authLoading || loading) {

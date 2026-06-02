@@ -1,7 +1,9 @@
+import { supabase } from "@/lib/supabase";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as NavigationBar from "expo-navigation-bar";
+import { useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Dimensions,
   StyleSheet,
@@ -9,6 +11,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+
 import BiddingButtonPopUp from "../../src/components/BiddingButtonPopUp";
 import { colors } from "../../src/theme/tokens";
 import Cards from "./cards";
@@ -16,12 +19,21 @@ import PlayerIcon from "./playericons";
 
 const { width, height } = Dimensions.get("window");
 
+interface RoomPlayer {
+  profiles?: { username?: string } | { username?: string }[];
+  seat_number: number;
+}
+
 const GameScreen: React.FC = () => {
   const navigation = useNavigation();
+  const { roomId } = useLocalSearchParams();
+
+  const [players, setPlayers] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
   useFocusEffect(
     useCallback(() => {
       NavigationBar.setVisibilityAsync("hidden");
-      // NavigationBar.setBehaviorAsync("overlay-swipe"); // Removed due to edge-to-edge incompatibility
 
       return () => {
         NavigationBar.setVisibilityAsync("visible");
@@ -29,8 +41,73 @@ const GameScreen: React.FC = () => {
     }, []),
   );
 
+  const fetchPlayers = async () => {
+    if (!roomId) return;
+
+    setLoading(true);
+
+    const { data, error } = await supabase
+      .from("room_players")
+      .select(
+        `
+        seat_number,
+        profiles:user_id ( username )
+      `,
+      )
+      .eq("room_id", roomId)
+      .order("seat_number", { ascending: true });
+
+    if (error) {
+      console.error("Error fetching players:", error);
+      setLoading(false);
+      return;
+    }
+
+    const playerNames =
+      (data as RoomPlayer[])?.map((player) => {
+        const profile = Array.isArray(player.profiles)
+          ? player.profiles[0]
+          : player.profiles;
+        return profile?.username || `Player ${player.seat_number}`;
+      }) || [];
+
+    setPlayers(playerNames);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchPlayers();
+  }, [roomId]);
+
+  useEffect(() => {
+    if (!roomId) return;
+
+    const channel = supabase
+      .channel(`game-room-${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "room_players",
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => {
+          fetchPlayers();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId]);
+  console.log("Current Players:", players[0]);
+
   return (
     <View style={styles.container}>
+      <StatusBar hidden />
+
       <BiddingButtonPopUp style={styles.biddingButton} />
 
       <TouchableOpacity
@@ -40,29 +117,39 @@ const GameScreen: React.FC = () => {
         <Text style={styles.iconText}>←</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.settingsButton}
-        onPress={() => navigation.navigate("" as never)}
-      >
+      <TouchableOpacity style={styles.settingsButton} onPress={() => {}}>
         <Text style={styles.iconText}>⚙️</Text>
       </TouchableOpacity>
-      <StatusBar hidden />
+
       <View style={styles.table}>
         {/* Top Player */}
-        <View style={[styles.player, styles.top]}>
-          <PlayerIcon name="Player X" />
-        </View>
+        {players[1] && (
+          <View style={[styles.player, styles.top]}>
+            <PlayerIcon
+              name={loading ? "Loading..." : players[1] || "Player 2"}
+            />
+          </View>
+        )}
+
         {/* Left Player */}
-        <View style={[styles.player, styles.left]}>
-          <PlayerIcon name="Player X" />
-        </View>
+        {players[2] && (
+          <View style={[styles.player, styles.left]}>
+            <PlayerIcon
+              name={loading ? "Loading..." : players[2] || "Player 3"}
+            />
+          </View>
+        )}
 
         {/* Right Player */}
-        <View style={[styles.player, styles.right]}>
-          <PlayerIcon name="Player X" />
-        </View>
+        {players[3] && (
+          <View style={[styles.player, styles.right]}>
+            <PlayerIcon
+              name={loading ? "Loading..." : players[3] || "Player 4"}
+            />
+          </View>
+        )}
 
-        {/* Bottom Player */}
+        {/* Bottom Player (Current User) */}
 
         {/* Cards */}
         <View style={styles.cardsContainer}>
@@ -82,8 +169,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+
   table: {
-    width: width * 1,
+    width: width,
     height: height * 0.8,
     backgroundColor: colors.accentDark,
     borderRadius: 200,
@@ -123,6 +211,7 @@ const styles = StyleSheet.create({
     bottom: 20,
     alignSelf: "center",
   },
+
   backButton: {
     position: "absolute",
     top: 40,

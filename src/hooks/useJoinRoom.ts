@@ -41,7 +41,7 @@ export const useJoinRoom = () => {
       }
 
       const room = rooms[0];
-      console.log("✅ Room found:", room);
+      console.log("Room found:", room);
 
       // ... rest of the join logic
       if (room.current_players >= 4) {
@@ -80,7 +80,7 @@ export const useJoinRoom = () => {
         room_id: room.id,
         user_id: user.id,
         seat_number: seatNumber,
-        username: user.username ,
+        username: user.username,
         is_host: false,
       });
 

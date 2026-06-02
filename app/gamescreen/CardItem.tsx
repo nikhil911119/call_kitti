@@ -1,12 +1,12 @@
 import { getCardImage } from "@/src/utils/cardImages";
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Image, PanResponder, StyleSheet } from "react-native";
 import {
   CARD_HEIGHT,
   CARD_SPACING,
   CARD_WIDTH,
   clamp,
-  getCardPosition
+  getCardPosition,
 } from "../../lib/viewCardHelper";
 export const CardItem: React.FC<{
   card: string;
@@ -16,7 +16,7 @@ export const CardItem: React.FC<{
 }> = ({ card, index, itemCount, onSwap }) => {
   const translateX = useRef(new Animated.Value(getCardPosition(index))).current;
   const translateY = useRef(new Animated.Value(0)).current;
-  const zIndex = useRef(new Animated.Value(0)).current;
+  const [dragging, setDragging] = useState(false);
   const isDragging = useRef(false);
   const startX = useRef(0);
   const currentDragIndex = useRef(index);
@@ -39,13 +39,9 @@ export const CardItem: React.FC<{
         onStartShouldSetPanResponder: () => true,
         onPanResponderGrant: () => {
           isDragging.current = true;
+          setDragging(true);
           currentDragIndex.current = index;
           startX.current = getCardPosition(index);
-          Animated.timing(zIndex, {
-            toValue: 100,
-            duration: 0,
-            useNativeDriver: false,
-          }).start();
           Animated.spring(translateY, {
             toValue: -12,
             useNativeDriver: false,
@@ -79,13 +75,9 @@ export const CardItem: React.FC<{
         },
         onPanResponderRelease: () => {
           isDragging.current = false;
+          setDragging(false);
           Animated.spring(translateY, {
             toValue: 0,
-            useNativeDriver: false,
-          }).start();
-          Animated.timing(zIndex, {
-            toValue: 0,
-            duration: 0,
             useNativeDriver: false,
           }).start();
           Animated.spring(translateX, {
@@ -97,6 +89,7 @@ export const CardItem: React.FC<{
         },
         onPanResponderTerminate: () => {
           isDragging.current = false;
+          setDragging(false);
           Animated.spring(translateY, {
             toValue: 0,
             useNativeDriver: false,
@@ -107,7 +100,7 @@ export const CardItem: React.FC<{
           }).start();
         },
       }),
-    [index, itemCount, onSwap, translateX, translateY, zIndex],
+    [index, itemCount, onSwap, translateX, translateY],
   );
 
   return (
@@ -116,7 +109,8 @@ export const CardItem: React.FC<{
         styles.card,
         {
           transform: [{ translateX }, { translateY }],
-          zIndex: zIndex,
+          zIndex: dragging ? 100 : 0,
+          elevation: dragging ? 10 : 0,
         },
       ]}
       {...panResponder.panHandlers}
@@ -125,6 +119,9 @@ export const CardItem: React.FC<{
     </Animated.View>
   );
 };
+
+export default CardItem;
+
 const styles = StyleSheet.create({
   card: {
     position: "absolute",
