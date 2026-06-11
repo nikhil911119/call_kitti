@@ -154,7 +154,7 @@ export default function LobbyScreen() {
           setRoom((prev) => (prev ? { ...prev, ...updatedRoom } : prev));
 
           if (["active", "started", "playing"].includes(updatedRoom.status)) {
-            router.push(`/gamescreen/gamescreen?roomId=${room.id}`);
+            router.push(`/gamescreen/gamescreen?roomId=${updatedRoom.id}`);
           }
         },
       )

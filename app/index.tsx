@@ -1,10 +1,9 @@
 import { router } from "expo-router";
-import React, { useEffect } from "react";
+import React from "react";
 import { StatusBar, StyleSheet, Text, View } from "react-native";
 import { AppButton } from "../src/components/AppButton";
 import { colors } from "../src/theme/tokens";
 export default function HomeScreen() {
-
   return (
     <View style={styles.container}>
       <StatusBar hidden />

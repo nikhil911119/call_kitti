@@ -8,11 +8,12 @@ import {
   clamp,
   getCardPosition,
 } from "../../lib/viewCardHelper";
+
 export const CardItem: React.FC<{
   card: string;
   index: number;
   itemCount: number;
-  onSwap: (from: number, to: number) => void;
+  onSwap?: (from: number, to: number) => void; // ← optional
 }> = ({ card, index, itemCount, onSwap }) => {
   const translateX = useRef(new Animated.Value(getCardPosition(index))).current;
   const translateY = useRef(new Animated.Value(0)).current;
@@ -36,7 +37,8 @@ export const CardItem: React.FC<{
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => true,
+        // Only become responder if dragging is allowed (onSwap provided)
+        onStartShouldSetPanResponder: () => !!onSwap,
         onPanResponderGrant: () => {
           isDragging.current = true;
           setDragging(true);
@@ -48,11 +50,12 @@ export const CardItem: React.FC<{
           }).start();
         },
         onPanResponderMove: (_, gestureState) => {
+          if (!onSwap) return;
+
           translateX.setValue(startX.current + gestureState.dx);
 
           const currentX = startX.current + gestureState.dx;
 
-          // Calculate target index based on actual card positions
           let targetIndex = currentDragIndex.current;
           for (let i = 0; i < itemCount; i++) {
             const cardPosition = getCardPosition(i);

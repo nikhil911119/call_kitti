@@ -17,7 +17,9 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({ style }) => {
   const [currentBid, setCurrentBid] = useState(0);
 
   const handleBidPress = () => {
+    
     setModalVisible(true);
+
   };
 
   const handleDecreaseBid = () => {

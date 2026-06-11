@@ -3,7 +3,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import * as NavigationBar from "expo-navigation-bar";
 import { useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Dimensions,
   StyleSheet,
@@ -20,7 +20,14 @@ import PlayerIcon from "./playericons";
 const { width, height } = Dimensions.get("window");
 
 interface RoomPlayer {
+  user_id: string;
+  seat_number: number;
   profiles?: { username?: string } | { username?: string }[];
+}
+
+interface Player {
+  id: string;
+  name: string;
   seat_number: number;
 }
 
@@ -28,61 +35,107 @@ const GameScreen: React.FC = () => {
   const navigation = useNavigation();
   const { roomId } = useLocalSearchParams();
 
-  const [players, setPlayers] = useState<string[]>([]);
+  const [players, setPlayers] = useState<Player[]>([]);
+  const [mySeat, setMySeat] = useState<number | null>(null);
+  const [myId, setMyId] = useState<string | null>(null);
+  const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useFocusEffect(
     useCallback(() => {
       NavigationBar.setVisibilityAsync("hidden");
-
       return () => {
         NavigationBar.setVisibilityAsync("visible");
       };
     }, []),
   );
 
-  const fetchPlayers = async () => {
+  // Fetch the latest active round for this room
+  const fetchCurrentRound = async () => {
     if (!roomId) return;
 
-    setLoading(true);
-
     const { data, error } = await supabase
-      .from("room_players")
-      .select(
-        `
-        seat_number,
-        profiles:user_id ( username )
-      `,
-      )
+      .from("game_rounds")
+      .select("id")
       .eq("room_id", roomId)
-      .order("seat_number", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (error) {
-      console.error("Error fetching players:", error);
-      setLoading(false);
+      console.error("Error fetching round:", error);
       return;
     }
 
-    const playerNames =
-      (data as RoomPlayer[])?.map((player) => {
-        const profile = Array.isArray(player.profiles)
-          ? player.profiles[0]
-          : player.profiles;
-        return profile?.username || `Player ${player.seat_number}`;
-      }) || [];
+    if (data?.id) {
+      setCurrentRoundId(data.id);
+    }
+  };
 
-    setPlayers(playerNames);
-    setLoading(false);
+  const fetchPlayers = async () => {
+    if (!roomId) return;
+
+    try {
+      setLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      const { data, error } = await supabase
+        .from("room_players")
+        .select(
+          `
+          user_id,
+          seat_number,
+          profiles:user_id ( username )
+        `,
+        )
+        .eq("room_id", roomId)
+        .order("seat_number", { ascending: true });
+
+      if (error) {
+        console.error("Error fetching players:", error);
+        return;
+      }
+
+      const formatted: Player[] =
+        (data as RoomPlayer[])?.map((player) => {
+          const profile = Array.isArray(player.profiles)
+            ? player.profiles[0]
+            : player.profiles;
+
+          return {
+            id: player.user_id,
+            seat_number: player.seat_number,
+            name: profile?.username || `Player ${player.seat_number}`,
+          };
+        }) || [];
+
+      setPlayers(formatted);
+
+      const me = formatted.find((p) => p.id === user?.id);
+      if (me) {
+        setMySeat(me.seat_number);
+        setMyId(me.id);
+      }
+    } catch (err) {
+      console.error("Fetch players failed:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
     fetchPlayers();
+    fetchCurrentRound();
   }, [roomId]);
 
+  // Listen for room_players changes
   useEffect(() => {
     if (!roomId) return;
 
-    const channel = supabase
+    const playersChannel = supabase
       .channel(`game-room-${roomId}`)
       .on(
         "postgres_changes",
@@ -92,17 +145,66 @@ const GameScreen: React.FC = () => {
           table: "room_players",
           filter: `room_id=eq.${roomId}`,
         },
-        () => {
-          fetchPlayers();
+        () => fetchPlayers(),
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(playersChannel);
+    };
+  }, [roomId]);
+
+  // Listen for new rounds starting
+  useEffect(() => {
+    if (!roomId) return;
+
+    const roundsChannel = supabase
+      .channel(`game-rounds-${roomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "game_rounds",
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload) => {
+          // New round started — update the round id so all Cards re-fetch
+          setCurrentRoundId(payload.new.id);
         },
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(roundsChannel);
     };
   }, [roomId]);
-  console.log("Current Players:", players[0]);
+
+  /**
+   * Relative Seat Map
+   *
+   * Relative 1 = Top
+   * Relative 2 = Left
+   * Relative 3 = Right
+   * Relative 4 = Bottom (YOU) — not rendered as icon
+   */
+  const seatMap = useMemo(() => {
+    const map: Record<number, Player | null> = {
+      1: null,
+      2: null,
+      3: null,
+      4: null,
+    };
+
+    if (!mySeat) return map;
+
+    players.forEach((player) => {
+      const relativeSeat = ((player.seat_number - mySeat + 3) % 4) + 1;
+      map[relativeSeat] = player;
+    });
+
+    return map;
+  }, [players, mySeat]);
 
   return (
     <View style={styles.container}>
@@ -122,38 +224,32 @@ const GameScreen: React.FC = () => {
       </TouchableOpacity>
 
       <View style={styles.table}>
-        {/* Top Player */}
-        {players[1] && (
+        {/* TOP */}
+        {seatMap[1] && (
           <View style={[styles.player, styles.top]}>
-            <PlayerIcon
-              name={loading ? "Loading..." : players[1] || "Player 2"}
-            />
+            <PlayerIcon name={seatMap[1].name} />
           </View>
         )}
 
-        {/* Left Player */}
-        {players[2] && (
+        {/* LEFT */}
+        {seatMap[2] && (
           <View style={[styles.player, styles.left]}>
-            <PlayerIcon
-              name={loading ? "Loading..." : players[2] || "Player 3"}
-            />
+            <PlayerIcon name={seatMap[2].name} />
           </View>
         )}
 
-        {/* Right Player */}
-        {players[3] && (
+        {/* RIGHT */}
+        {seatMap[3] && (
           <View style={[styles.player, styles.right]}>
-            <PlayerIcon
-              name={loading ? "Loading..." : players[3] || "Player 4"}
-            />
+            <PlayerIcon name={seatMap[3].name} />
           </View>
         )}
 
-        {/* Bottom Player (Current User) */}
-
-        {/* Cards */}
+        {/* YOUR CARDS ONLY */}
         <View style={styles.cardsContainer}>
-          <Cards />
+          {myId && (
+            <Cards playerId={myId} roundId={currentRoundId} isMe={true} />
+          )}
         </View>
       </View>
     </View>
@@ -182,6 +278,7 @@ const styles = StyleSheet.create({
 
   player: {
     position: "absolute",
+    alignItems: "center",
   },
 
   top: {
@@ -210,6 +307,11 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 20,
     alignSelf: "center",
+  },
+
+  otherCardsContainer: {
+    marginTop: 6,
+    opacity: 0.85,
   },
 
   backButton: {
