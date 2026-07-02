@@ -1,25 +1,98 @@
+import { rankPlayerHands } from "@/app/game_logic/rankPlayersHand";
+import { supabase } from "@/lib/supabase";
 import React, { useState } from "react";
 import {
-  View,
-  Text,
-  TouchableOpacity,
+  Alert,
   Modal,
   StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
   ViewStyle,
 } from "react-native";
 
 type BiddingButtonPopUpProps = {
   style?: ViewStyle;
+  arrangedCards: string[];
+  roundId: string | null;
+  playerId: string | null;
 };
 
-const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({ style }) => {
+const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({
+  style,
+  arrangedCards,
+  roundId,
+  playerId,
+}) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [currentBid, setCurrentBid] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleBidPress = () => {
-    
     setModalVisible(true);
+  };
 
+  const formatCardsAs2D = (cards: string[]): string[][] => {
+    const rows: string[][] = [];
+    for (let i = 0; i < cards.length; i += 3) {
+      rows.push(cards.slice(i, i + 3));
+    }
+    return rows;
+  };
+
+  const handleConfirmBid = async () => {
+    const { data, error } = await supabase
+      .from("player_hands")
+      .select("sets")
+      .eq("round_id", roundId)
+      .eq("player_id", playerId)
+      .maybeSingle();
+    if (!playerId || !roundId) {
+      Alert.alert(
+        "Unable to place bid",
+        "Missing player or round context. Please try again.",
+      );
+
+      return;
+    }
+
+    if (arrangedCards.length === 0) {
+      Alert.alert(
+        "No cards available",
+        "Please arrange your cards before placing a bid.",
+      );
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const cards2D = formatCardsAs2D(arrangedCards);
+
+    try {
+      const payload = {
+        round_id: roundId,
+        player_id: playerId,
+        cards: arrangedCards,
+        sets: rankPlayerHands(cards2D || []),
+        set_types: [],
+        call: currentBid,
+      };
+
+      const { error } = await supabase
+        .from("player_hands")
+        .upsert(payload, { onConflict: "round_id,player_id" });
+
+      if (error) throw error;
+      console.log("Ranked hands:");
+
+      Alert.alert("Bid placed", `Your bid of ${currentBid} was saved.`);
+      setModalVisible(false);
+    } catch (error: any) {
+      console.error("Bid submit failed:", error);
+      Alert.alert("Failed to save bid", error?.message || "Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleDecreaseBid = () => {
@@ -34,11 +107,6 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({ style }) => {
     }
   };
 
-  const handleConfirmBid = () => {
-    alert(`Bid of ${currentBid} placed successfully!`);
-    setModalVisible(false);
-  };
-
   const handleCloseModal = () => {
     setModalVisible(false);
     setCurrentBid(0);
@@ -46,7 +114,10 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({ style }) => {
 
   return (
     <>
-      <TouchableOpacity style={[styles.bidButton, style]} onPress={handleBidPress}>
+      <TouchableOpacity
+        style={[styles.bidButton, style]}
+        onPress={handleBidPress}
+      >
         <Text style={styles.bidButtonText}>Place Bid</Text>
       </TouchableOpacity>
 
@@ -55,29 +126,35 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({ style }) => {
         transparent={true}
         visible={modalVisible}
         onRequestClose={handleCloseModal}
-   
       >
-        <TouchableOpacity style={styles.modalOverlay} onPress={handleCloseModal}>
-           
-       
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          onPress={handleCloseModal}
+        >
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>Place Your Bid</Text>
-            
+
             <View style={styles.bidSelector}>
-              <TouchableOpacity 
-                style={[styles.controlButton, currentBid === 0 && styles.disabledButton]} 
+              <TouchableOpacity
+                style={[
+                  styles.controlButton,
+                  currentBid === 0 && styles.disabledButton,
+                ]}
                 onPress={handleDecreaseBid}
                 disabled={currentBid === 0}
               >
                 <Text style={styles.controlButtonText}>-</Text>
               </TouchableOpacity>
-              
+
               <View style={styles.bidDisplay}>
                 <Text style={styles.bidValue}>{currentBid}</Text>
               </View>
-              
-              <TouchableOpacity 
-                style={[styles.controlButton, currentBid === 4 && styles.disabledButton]} 
+
+              <TouchableOpacity
+                style={[
+                  styles.controlButton,
+                  currentBid === 4 && styles.disabledButton,
+                ]}
                 onPress={handleIncreaseBid}
                 disabled={currentBid === 4}
               >
@@ -96,13 +173,15 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({ style }) => {
               <TouchableOpacity
                 style={[styles.modalButton, styles.confirmButton]}
                 onPress={handleConfirmBid}
+                disabled={isSubmitting}
               >
-                <Text style={styles.confirmButtonText}>Confirm Bid</Text>
+                <Text style={styles.confirmButtonText}>
+                  {isSubmitting ? "Saving..." : "Confirm Bid"}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
-   
-         </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </>
   );

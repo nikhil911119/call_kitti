@@ -1,15 +1,15 @@
 import { evaluateHand } from "./evaluateHand";
 import { Card } from "./constants";
 
-export const rankPlayerHands = (hands: Card[][]): number[] => {
-  const evaluated = hands.map((hand, index) => ({
-    index,
-    ...evaluateHand(hand)
+export const rankPlayerHands = (hands: Card[][]): Card[][] => {
+  const evaluated = hands.map((hand) => ({
+    hand,
+    ...evaluateHand(hand),
   }));
 
   const compare = (a: any, b: any) => {
     if (a.priority !== b.priority) {
-      return b.priority - a.priority; // higher priority first
+      return b.priority - a.priority;
     }
 
     for (let i = 0; i < Math.max(a.tiebreak.length, b.tiebreak.length); i++) {
@@ -20,15 +20,5 @@ export const rankPlayerHands = (hands: Card[][]): number[] => {
     return 0;
   };
 
-  // ✅ sort COPY (not original hands)
-  const sorted = [...evaluated].sort(compare);
-
-  const ranks = new Array(hands.length);
-
-  // assign ranks
-  sorted.forEach((hand, i) => {
-    ranks[hand.index] = i + 1;
-  });
-
-  return ranks;
+  return evaluated.sort(compare).map(({ hand }) => hand);
 };

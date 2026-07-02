@@ -30,7 +30,6 @@ export const dealCardsToPlayer = (numPlayers: number): Card[][][] => {
   const shuffled = shuffleDeck(fullDeck);
 
   const cardsPerPlayer = 13;
-  const totalCards = numPlayers * cardsPerPlayer;
 
   const playerHands: Card[][][] = [];   // [player][set]
 

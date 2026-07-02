@@ -40,6 +40,7 @@ const GameScreen: React.FC = () => {
   const [myId, setMyId] = useState<string | null>(null);
   const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [arrangedCards, setArrangedCards] = useState<string[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -210,7 +211,12 @@ const GameScreen: React.FC = () => {
     <View style={styles.container}>
       <StatusBar hidden />
 
-      <BiddingButtonPopUp style={styles.biddingButton} />
+      <BiddingButtonPopUp
+        style={styles.biddingButton}
+        arrangedCards={arrangedCards}
+        roundId={currentRoundId}
+        playerId={myId}
+      />
 
       <TouchableOpacity
         style={styles.backButton}
@@ -248,7 +254,12 @@ const GameScreen: React.FC = () => {
         {/* YOUR CARDS ONLY */}
         <View style={styles.cardsContainer}>
           {myId && (
-            <Cards playerId={myId} roundId={currentRoundId} isMe={true} />
+            <Cards
+              playerId={myId}
+              roundId={currentRoundId}
+              isMe={true}
+              onArrangementChange={setArrangedCards}
+            />
           )}
         </View>
       </View>

@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { getCardPosition, moveItem } from "../../lib/viewCardHelper";
 import { CardItem } from "./CardItem";
@@ -11,10 +11,17 @@ interface CardsProps {
   playerId: string;
   roundId: string | null;
   isMe?: boolean;
+  onArrangementChange?: (arrangedCards: string[]) => void;
 }
 
-const Cards: React.FC<CardsProps> = ({ playerId, roundId, isMe = false }) => {
+const Cards: React.FC<CardsProps> = ({
+  playerId,
+  roundId,
+  isMe = false,
+  onArrangementChange,
+}) => {
   const [cards, setCards] = useState<string[]>([]);
+  const hasLoadedInitialCards = useRef(false);
 
   useEffect(() => {
     const fetchCards = async () => {
@@ -32,7 +39,19 @@ const Cards: React.FC<CardsProps> = ({ playerId, roundId, isMe = false }) => {
         return;
       }
 
-      setCards((data as { cards?: string[] } | null)?.cards ?? []);
+      const fetchedCards = (data as { cards?: string[] } | null)?.cards ?? [];
+
+      if (!isMe && fetchedCards.length > 0) {
+        setCards(fetchedCards);
+      }
+
+      if (isMe && fetchedCards.length > 0) {
+        if (!hasLoadedInitialCards.current) {
+          setCards(fetchedCards);
+          hasLoadedInitialCards.current = true;
+        }
+        onArrangementChange?.(cards.length > 0 ? cards : fetchedCards);
+      }
     };
 
     fetchCards();
@@ -49,21 +68,33 @@ const Cards: React.FC<CardsProps> = ({ playerId, roundId, isMe = false }) => {
           table: "player_hands",
           filter: `round_id=eq.${roundId}`,
         },
-        () => fetchCards(),
+        () => {
+          if (!isMe) {
+            fetchCards();
+          }
+        },
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [playerId, roundId]);
+  }, [playerId, roundId, isMe]);
 
   // Only defined when isMe — CardItem receives undefined otherwise, disabling drag
   const onSwap = useCallback(
     (from: number, to: number) => {
-      setCards((prev) => moveItem(prev, from, to));
+      setCards((prev) => {
+        const updated = moveItem(prev, from, to);
+        // Defer callback to next tick to avoid updating parent during child render
+        requestAnimationFrame(() => {
+          console.log("Card arrangement changed:", updated);
+          onArrangementChange?.(updated);
+        });
+        return updated;
+      });
     },
-    [],
+    [onArrangementChange],
   );
 
   const containerWidth = useMemo(() => {
