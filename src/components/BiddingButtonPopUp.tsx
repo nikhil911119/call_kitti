@@ -16,6 +16,7 @@ type BiddingButtonPopUpProps = {
   arrangedCards: string[];
   roundId: string | null;
   playerId: string | null;
+  onBidPlaced?: (bidAmount: number) => void;
 };
 
 const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({
@@ -23,6 +24,8 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({
   arrangedCards,
   roundId,
   playerId,
+
+  onBidPlaced,
 }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [currentBid, setCurrentBid] = useState(0);
@@ -87,6 +90,7 @@ const BiddingButtonPopUp: React.FC<BiddingButtonPopUpProps> = ({
 
       Alert.alert("Bid placed", `Your bid of ${currentBid} was saved.`);
       setModalVisible(false);
+      onBidPlaced?.(currentBid);
     } catch (error: any) {
       console.error("Bid submit failed:", error);
       Alert.alert("Failed to save bid", error?.message || "Please try again.");

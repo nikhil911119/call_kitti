@@ -19,6 +19,7 @@ export const rankPlayerHands = (hands: Card[][]): Card[][] => {
 
     return 0;
   };
+  const sortEvaluated = evaluated.sort(compare).map(({ hand }) => hand);
 
-  return evaluated.sort(compare).map(({ hand }) => hand);
+  return sortEvaluated.slice(0, 4);
 };

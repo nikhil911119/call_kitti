@@ -1,5 +1,11 @@
 import { supabase } from "@/lib/supabase";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { StyleSheet, View } from "react-native";
 import { getCardPosition, moveItem } from "../../lib/viewCardHelper";
 import { CardItem } from "./CardItem";
@@ -11,6 +17,7 @@ interface CardsProps {
   playerId: string;
   roundId: string | null;
   isMe?: boolean;
+  isBidLocked?: boolean;
   onArrangementChange?: (arrangedCards: string[]) => void;
 }
 
@@ -18,6 +25,7 @@ const Cards: React.FC<CardsProps> = ({
   playerId,
   roundId,
   isMe = false,
+  isBidLocked = false,
   onArrangementChange,
 }) => {
   const [cards, setCards] = useState<string[]>([]);
@@ -110,7 +118,7 @@ const Cards: React.FC<CardsProps> = ({
           card={card}
           index={index}
           itemCount={cards.length}
-          onSwap={isMe ? onSwap : undefined} // ← undefined disables drag in CardItem
+          onSwap={isMe && !isBidLocked ? onSwap : undefined} // disable drag after a bid is placed
         />
       ))}
     </View>

@@ -10,6 +10,7 @@ export type SetType =
 
 export const getRankValue = (card: Card): number => {
   const rank = card.slice(0, -1);
+  
   if (rank === "A") return 14;
   if (rank === "K") return 13;
   if (rank === "Q") return 12;
@@ -26,6 +27,7 @@ export const getSetPriority = (type: SetType): number => {
     case "color": return 3;
     case "double": return 2;
     case "high_card": return 1;
+    case "none": return 0;
     default: return 0;
   }
 };

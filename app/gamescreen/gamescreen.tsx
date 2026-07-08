@@ -14,8 +14,11 @@ import {
 
 import BiddingButtonPopUp from "../../src/components/BiddingButtonPopUp";
 import { colors } from "../../src/theme/tokens";
+import { getWinnersMask } from "../game_logic/getWinner";
 import Cards from "./cards";
 import PlayerIcon from "./playericons";
+import Scoreboard from "./Scoreboard";
+import ShowHandsScreen from "./ShowHandsScreen";
 
 const { width, height } = Dimensions.get("window");
 
@@ -39,8 +42,38 @@ const GameScreen: React.FC = () => {
   const [mySeat, setMySeat] = useState<number | null>(null);
   const [myId, setMyId] = useState<string | null>(null);
   const [currentRoundId, setCurrentRoundId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [arrangedCards, setArrangedCards] = useState<string[]>([]);
+  const [isBidPlaced, setIsBidPlaced] = useState(false);
+  const [showScoreboard, setShowScoreboard] = useState(false);
+  const [showHands, setShowHands] = useState(false);
+  const [handsByPlayer, setHandsByPlayer] = useState<
+    Record<string, string[][]>
+  >({});
+  const [previousBidCount, setPreviousBidCount] = useState(0);
+
+  const broadcastPointsUpdate = useCallback(
+    async (
+      nextRoundId: string | null,
+      nextPlayerId: string | null,
+      points: number | null,
+    ) => {
+      if (!nextRoundId || !nextPlayerId) return;
+
+      const channel = supabase.channel(`scoreboard-${nextRoundId}`);
+      await channel.subscribe();
+      await channel.send({
+        type: "broadcast",
+        event: "points-updated",
+        payload: {
+          roundId: nextRoundId,
+          playerId: nextPlayerId,
+          points,
+        },
+      });
+      supabase.removeChannel(channel);
+    },
+    [],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -52,7 +85,7 @@ const GameScreen: React.FC = () => {
   );
 
   // Fetch the latest active round for this room
-  const fetchCurrentRound = async () => {
+  const fetchCurrentRound = useCallback(async () => {
     if (!roomId) return;
 
     const { data, error } = await supabase
@@ -71,14 +104,12 @@ const GameScreen: React.FC = () => {
     if (data?.id) {
       setCurrentRoundId(data.id);
     }
-  };
+  }, [roomId]);
 
-  const fetchPlayers = async () => {
+  const fetchPlayers = useCallback(async () => {
     if (!roomId) return;
 
     try {
-      setLoading(true);
-
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -122,15 +153,40 @@ const GameScreen: React.FC = () => {
       }
     } catch (err) {
       console.error("Fetch players failed:", err);
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [roomId]);
 
   useEffect(() => {
     fetchPlayers();
     fetchCurrentRound();
-  }, [roomId]);
+  }, [fetchPlayers, fetchCurrentRound]);
+
+  const groupCardsIntoSets = (cards: string[] | string[][]): string[][] => {
+    if (!cards) return [];
+    if (Array.isArray(cards[0])) {
+      return cards as string[][];
+    }
+
+    const flatCards = cards as string[];
+    const sets: string[][] = [];
+
+    for (let i = 0; i < flatCards.length; i += 3) {
+      if (i + 3 <= flatCards.length && i < 12) {
+        sets.push(flatCards.slice(i, i + 3));
+      } else {
+        sets.push(flatCards.slice(i));
+      }
+    }
+
+    return sets;
+  };
+
+  useEffect(() => {
+    setIsBidPlaced(false);
+    setShowHands(false);
+    setHandsByPlayer({});
+    setPreviousBidCount(0);
+  }, [currentRoundId]);
 
   // Listen for room_players changes
   useEffect(() => {
@@ -153,7 +209,7 @@ const GameScreen: React.FC = () => {
     return () => {
       supabase.removeChannel(playersChannel);
     };
-  }, [roomId]);
+  }, [roomId, fetchPlayers]);
 
   // Listen for new rounds starting
   useEffect(() => {
@@ -180,6 +236,111 @@ const GameScreen: React.FC = () => {
       supabase.removeChannel(roundsChannel);
     };
   }, [roomId]);
+
+  const fetchHands = useCallback(async () => {
+    if (!roomId || !currentRoundId || players.length === 0) return;
+
+    const { data, error } = await supabase
+      .from("player_hands")
+      .select("player_id, cards, sets, call")
+      .eq("round_id", currentRoundId);
+
+    if (error) {
+      console.error("Failed to fetch hand reveal data:", error);
+      return;
+    }
+
+    const entries = (data ?? []) as {
+      player_id?: string;
+      cards?: string[] | string[][];
+      sets?: string[] | string[][];
+      call?: number | null;
+    }[];
+
+    const bidsWithCall = entries.filter(
+      (entry) => entry.call !== undefined && entry.call !== null,
+    );
+    const currentBidCount = bidsWithCall.length;
+
+    const hasBidForEachPlayer = players.every((player) => {
+      const match = entries.find((entry) => entry.player_id === player.id);
+      return Boolean(match?.call !== undefined && match?.call !== null);
+    });
+
+    if (
+      hasBidForEachPlayer &&
+      currentBidCount > previousBidCount &&
+      currentBidCount === players.length
+    ) {
+      const mapped = entries.reduce<Record<string, string[][]>>(
+        (acc, entry) => {
+          if (entry.player_id) {
+            acc[entry.player_id] = groupCardsIntoSets(
+              entry.sets ?? entry.cards ?? [],
+            );
+          }
+          return acc;
+        },
+        {},
+      );
+
+      const playerOrder = players.map((player) => player.id);
+      const maxSets = Math.max(
+        0,
+        ...Object.values(mapped).map((sets) => sets.length),
+      );
+
+      for (let setIndex = 0; setIndex < maxSets; setIndex++) {
+        const handsForSet = playerOrder.map(
+          (playerId) => mapped[playerId]?.[setIndex] ?? [],
+        );
+        const winnerMask = getWinnersMask(handsForSet as any);
+        const winnerNames = winnerMask
+          .map((value, index) => (value === 1 ? players[index].name : null))
+          .filter(Boolean);
+
+        console.log(
+          `Round ${currentRoundId} set ${setIndex + 1} winner(s):`,
+          winnerNames.length > 0 ? winnerNames : ["tie or no winner"],
+          handsForSet,
+        );
+      }
+
+      setHandsByPlayer(mapped);
+      setShowHands(true);
+      setPreviousBidCount(currentBidCount);
+    } else {
+      setPreviousBidCount(currentBidCount);
+    }
+  }, [roomId, currentRoundId, players, previousBidCount]);
+
+  useEffect(() => {
+    fetchHands();
+  }, [fetchHands]);
+
+  useEffect(() => {
+    if (!roomId || !currentRoundId) return;
+
+    const handsChannel = supabase
+      .channel(`hands-${roomId}-${currentRoundId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "player_hands",
+          filter: `round_id=eq.${currentRoundId}`,
+        },
+        () => {
+          fetchHands();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(handsChannel);
+    };
+  }, [roomId, currentRoundId, fetchHands]);
 
   /**
    * Relative Seat Map
@@ -216,6 +377,10 @@ const GameScreen: React.FC = () => {
         arrangedCards={arrangedCards}
         roundId={currentRoundId}
         playerId={myId}
+        onBidPlaced={(bidAmount) => {
+          setIsBidPlaced(true);
+          broadcastPointsUpdate(currentRoundId, myId, bidAmount);
+        }}
       />
 
       <TouchableOpacity
@@ -225,9 +390,30 @@ const GameScreen: React.FC = () => {
         <Text style={styles.iconText}>←</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.settingsButton} onPress={() => {}}>
+      <TouchableOpacity
+        style={styles.settingsButton}
+        onPress={() => setShowScoreboard(true)}
+      >
         <Text style={styles.iconText}>⚙️</Text>
       </TouchableOpacity>
+
+      <Scoreboard
+        visible={showScoreboard}
+        players={players}
+        roundCount={5}
+        playerId={myId}
+        roundId={currentRoundId}
+        onClose={() => setShowScoreboard(false)}
+      />
+
+      <ShowHandsScreen
+        visible={showHands}
+        players={players}
+        handsByPlayer={handsByPlayer}
+        seatMap={seatMap as any}
+        roundId={currentRoundId}
+        onClose={() => setShowHands(false)}
+      />
 
       <View style={styles.table}>
         {/* TOP */}
@@ -258,6 +444,7 @@ const GameScreen: React.FC = () => {
               playerId={myId}
               roundId={currentRoundId}
               isMe={true}
+              isBidLocked={isBidPlaced}
               onArrangementChange={setArrangedCards}
             />
           )}
@@ -316,7 +503,7 @@ const styles = StyleSheet.create({
 
   cardsContainer: {
     position: "absolute",
-    bottom: 20,
+    bottom: -40,
     alignSelf: "center",
   },
 

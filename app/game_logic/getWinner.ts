@@ -1,5 +1,5 @@
-import { evaluateHand } from "./evaluateHand";
 import { Card } from "./constants";
+import { evaluateHand } from "./evaluateHand";
 
 export const getWinnersMask = (hands: Card[][]): number[] => {
   const evaluated = hands.map((hand) => evaluateHand(hand));
